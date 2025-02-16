@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
+import os
 from datetime import datetime
 from openpyxl.drawing.image import Image as OpenpyxlImage
 
@@ -30,23 +31,13 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS organizations
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS photos
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  record_id INTEGER,
+                  file_path TEXT,
+                  FOREIGN KEY(record_id) REFERENCES checks(id))''')
     conn.commit()
     conn.close()
-
-def add_organization(name):
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO organizations (name) VALUES (?)", (name,))
-    conn.commit()
-    conn.close()
-
-def get_organizations():
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("SELECT name FROM organizations")
-    organizations = c.fetchall()
-    conn.close()
-    return [org[0] for org in organizations]
 
 def add_record(data):
     conn = sqlite3.connect('software_checks.db')
@@ -56,34 +47,68 @@ def add_record(data):
                   start_time, end_time, personnel_count, checks_count, violations_count, 
                   violation_type, kpb_violation, kpb_detected, act_issued) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
+    record_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return record_id
+
+def save_photos(record_id, uploaded_files):
+    if not uploaded_files:
+        return
+    save_dir = f"uploads/{record_id}"
+    os.makedirs(save_dir, exist_ok=True)
+    conn = sqlite3.connect('software_checks.db')
+    c = conn.cursor()
+    for uploaded_file in uploaded_files:
+        file_path = os.path.join(save_dir, uploaded_file.name)
+        with open(file_path, 'wb') as f:
+            f.write(uploaded_file.getbuffer())
+        c.execute("INSERT INTO photos (record_id, file_path) VALUES (?, ?)", 
+                 (record_id, file_path))
     conn.commit()
     conn.close()
 
-def get_records():
+def get_photos(record_id):
     conn = sqlite3.connect('software_checks.db')
     c = conn.cursor()
-    c.execute("SELECT * FROM checks")
-    records = c.fetchall()
+    c.execute("SELECT file_path FROM photos WHERE record_id=?", (record_id,))
+    photos = [row[0] for row in c.fetchall()]
     conn.close()
-    return records
+    return photos
 
 def delete_record(record_id):
     conn = sqlite3.connect('software_checks.db')
     c = conn.cursor()
+    
+    # Delete photos from filesystem
+    photos = get_photos(record_id)
+    for photo in photos:
+        if os.path.exists(photo):
+            os.remove(photo)
+    
+    # Delete photo records from DB
+    c.execute("DELETE FROM photos WHERE record_id=?", (record_id,))
+    
+    # Delete main record
     c.execute("DELETE FROM checks WHERE id=?", (record_id,))
+    
     conn.commit()
     conn.close()
+    
+    # Delete directory if empty
+    dir_path = f"uploads/{record_id}"
+    if os.path.exists(dir_path):
+        try:
+            os.rmdir(dir_path)
+        except OSError:
+            pass
 
-def update_record(data):
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("UPDATE checks SET date=?, sp_name=?, responsible=? WHERE id=?", data)
-    conn.commit()
-    conn.close()
 
 def main():
     st.set_page_config(page_title="Проверки ПО в СП", layout="wide")
     init_db()
+    if not os.path.exists('uploads'):
+        os.makedirs('uploads')
     
     st.title("Проверки ПО в СП - Веб версия")
     
@@ -170,9 +195,33 @@ def main():
                 st.success("Запись успешно добавлена!")
                 st.rerun()
 
+                
+            # Добавление загрузчика файлов
+            uploaded_files = st.file_uploader(
+                "Прикрепить фотографии",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True
+            )
+            
+            if st.form_submit_button("Добавить запись"):
+                data = (
+                    # ... [Все существующие данные] ...
+                )
+                record_id = add_record(data)
+                save_photos(record_id, uploaded_files)
+                st.success("Запись успешно добавлена!")
+                st.rerun()
+                
     # Секция просмотра и управления записями
     with st.expander("Просмотр и управление записями"):
         records = get_records()
+        for record in records:
+            record_id = record[0]
+            with st.expander(f"Запись №{record_id} - {record[3]} ({record[1]})"):
+                cols = st.columns(2)
+                cols[0].write(f"**Дата:** {record[1]}")
+                cols[1].write(f"**СП:** {record[2]}")
+
         df = pd.DataFrame(records, columns=[
             "ID", "Дата", "СП", "Ответственный", "ПО", "Объект", "Работы", 
             "Зона", "Начало", "Конец", "Персонал", "Проверки", "Нарушения",
@@ -180,6 +229,17 @@ def main():
         ])
         
         st.dataframe(df, use_container_width=True)
+
+        # Отображение фотографий
+                photos = get_photos(record_id)
+                if photos:
+                    st.write("**Прикрепленные фотографии:**")
+                    cols = st.columns(3)
+                    for i, photo_path in enumerate(photos):
+                        with cols[i % 3]:
+                            st.image(photo_path, use_column_width=True)
+                else:
+                    st.write("Нет прикрепленных фотографий")
         
         with st.form("edit_form"):
             cols = st.columns(3)
