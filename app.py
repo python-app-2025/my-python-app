@@ -39,6 +39,21 @@ def init_db():
     conn.commit()
     conn.close()
 
+def add_organization(name):
+    conn = sqlite3.connect('software_checks.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO organizations (name) VALUES (?)", (name,))
+    conn.commit()
+    conn.close()
+
+def get_organizations():
+    conn = sqlite3.connect('software_checks.db')
+    c = conn.cursor()
+    c.execute("SELECT name FROM organizations")
+    organizations = c.fetchall()
+    conn.close()
+    return [org[0] for org in organizations]
+
 def add_record(data):
     conn = sqlite3.connect('software_checks.db')
     c = conn.cursor()
@@ -103,6 +118,20 @@ def delete_record(record_id):
         except OSError:
             pass
 
+def get_records():
+    conn = sqlite3.connect('software_checks.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM checks")
+    records = c.fetchall()
+    conn.close()
+    return records
+
+def update_record(data):
+    conn = sqlite3.connect('software_checks.db')
+    c = conn.cursor()
+    c.execute("UPDATE checks SET date=?, sp_name=?, responsible=? WHERE id=?", data)
+    conn.commit()
+    conn.close()
 
 def main():
     st.set_page_config(page_title="Проверки ПО в СП", layout="wide")
@@ -172,6 +201,12 @@ def main():
             
             act_issued = st.selectbox("Оформлен Акт*", ["Да", "Нет"])
             
+            uploaded_files = st.file_uploader(
+                "Прикрепить фотографии",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True
+            )
+            
             if st.form_submit_button("Добавить запись"):
                 data = (
                     date.strftime("%d.%m.%Y"),
@@ -191,81 +226,94 @@ def main():
                     1 if kpb_violation else 0,
                     1 if act_issued == "Да" else 0
                 )
-                add_record(data)
-                st.success("Запись успешно добавлена!")
-                st.rerun()
-
-                
-            # Добавление загрузчика файлов
-            uploaded_files = st.file_uploader(
-                "Прикрепить фотографии",
-                type=["png", "jpg", "jpeg"],
-                accept_multiple_files=True
-            )
-            
-            if st.form_submit_button("Добавить запись"):
-                data = (
-                    # ... [Все существующие данные] ...
-                )
                 record_id = add_record(data)
                 save_photos(record_id, uploaded_files)
                 st.success("Запись успешно добавлена!")
                 st.rerun()
-                
-    # Секция просмотра и управления записями
-    with st.expander("Просмотр и управление записями"):
-        records = get_records()
-        for record in records:
-            record_id = record[0]
-            with st.expander(f"Запись №{record_id} - {record[3]} ({record[1]})"):
-                cols = st.columns(2)
-                cols[0].write(f"**Дата:** {record[1]}")
-                cols[1].write(f"**СП:** {record[2]}")
 
-        df = pd.DataFrame(records, columns=[
-            "ID", "Дата", "СП", "Ответственный", "ПО", "Объект", "Работы", 
-            "Зона", "Начало", "Конец", "Персонал", "Проверки", "Нарушения",
-            "Тип нарушения", "КПБ", "Выявлено КПБ", "Акт"
-        ])
-        
-        st.dataframe(df, use_container_width=True)
+    # Секция управления записями
+    st.header("Управление записями")
+    
+    # Формы редактирования и удаления
+    with st.container():
+        cols = st.columns(2)
+        with cols[0]:
+            with st.form("edit_form"):
+                st.subheader("Редактирование записи")
+                selected_id = st.number_input("ID записи для редактирования", min_value=1)
+                edit_date = st.date_input("Новая дата")
+                edit_sp_name = st.selectbox("Новое наименование СП", ["АТУ", "УЖДТ"])
+                edit_responsible = st.text_input("Новый ответственный")
+                if st.form_submit_button("Сохранить изменения"):
+                    update_data = (
+                        edit_date.strftime("%d.%m.%Y"),
+                        edit_sp_name,
+                        edit_responsible,
+                        selected_id
+                    )
+                    update_record(update_data)
+                    st.success("Изменения сохранены!")
+                    st.rerun()
 
-        # Отображение фотографий
-                photos = get_photos(record_id)
-                if photos:
-                    st.write("**Прикрепленные фотографии:**")
-                    cols = st.columns(3)
-                    for i, photo_path in enumerate(photos):
-                        with cols[i % 3]:
-                            st.image(photo_path, use_column_width=True)
-                else:
-                    st.write("Нет прикрепленных фотографий")
-        
-        with st.form("edit_form"):
+        with cols[1]:
+            with st.form("delete_form"):
+                st.subheader("Удаление записи")
+                del_id = st.number_input("ID записи для удаления", min_value=1)
+                if st.form_submit_button("Удалить запись"):
+                    delete_record(del_id)
+                    st.success("Запись удалена!")
+                    st.rerun()
+
+    # Секция просмотра записей
+    st.header("Все записи")
+    
+    # Получаем данные из БД
+    records = get_records()
+    
+    # Создаем DataFrame
+    df = pd.DataFrame(records, columns=[
+        "ID", "Дата", "СП", "Ответственный", "ПО", "Объект", 
+        "Кол-во работ", "Зона ответ.", "Начало", "Окончание", 
+        "Персонал", "Проверки", "Нарушения", "Тип нарушения", 
+        "КПБ нарушение", "КПБ выявлено", "Акт"
+    ])
+    
+    # Улучшаем отображение таблицы
+    st.dataframe(
+        df.drop(columns=["КПБ выявлено"]),
+        use_container_width=True,
+        hide_index=True,
+        column_order=[
+            "ID", "Дата", "СП", "Ответственный", "ПО", "Объект",
+            "Кол-во работ", "Зона ответ.", "Начало", "Окончание",
+            "Персонал", "Проверки", "Нарушения", "Тип нарушения",
+            "КПБ нарушение", "Акт"
+        ],
+        column_config={
+            "Дата": st.column_config.DateColumn(
+                "Дата",
+                format="DD.MM.YYYY"
+            ),
+            "Акт": st.column_config.SelectboxColumn(
+                "Акт оформлен",
+                options=["Да", "Нет"]
+            )
+        }
+    )
+
+    # Секция просмотра фотографий
+    st.header("Просмотр фотографий")
+    selected_id = st.number_input("Введите ID записи для просмотра фотографий", min_value=1)
+    if st.button("Показать фотографии"):
+        photos = get_photos(selected_id)
+        if photos:
+            st.write(f"Фотографии для записи ID {selected_id}:")
             cols = st.columns(3)
-            selected_id = cols[0].number_input("ID записи для редактирования", min_value=1)
-            edit_date = cols[1].date_input("Новая дата")
-            edit_sp_name = cols[2].selectbox("Новое наименование СП", ["АТУ", "УЖДТ"])
-            
-            edit_responsible = st.text_input("Новый ответственный")
-            
-            if st.form_submit_button("Сохранить изменения"):
-                update_data = (
-                    edit_date.strftime("%d.%m.%Y"),
-                    edit_sp_name,
-                    edit_responsible,
-                    selected_id
-                )
-                update_record(update_data)
-                st.success("Изменения сохранены!")
-                st.rerun()
-
-        with st.form("delete_form"):
-            del_id = st.number_input("ID записи для удаления", min_value=1)
-            if st.form_submit_button("Удалить запись"):
-                delete_record(del_id)
-                st.success("Запись удалена!")
-                st.rerun()
+            for i, photo_path in enumerate(photos):
+                with cols[i % 3]:
+                    st.image(photo_path, use_column_width=True)
+        else:
+            st.warning("Для этой записи нет фотографий")
 
     # Секция аналитики
     with st.expander("Аналитика и отчеты"):
