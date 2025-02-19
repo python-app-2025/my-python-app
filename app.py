@@ -96,10 +96,52 @@ def get_record_by_id(record_id):
     record = c.fetchone()
     conn.close()
     return record
+
+
+def update_record(data):
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        try:
+            c.execute('''UPDATE checks SET
+                 date=?,
+                 sp_name=?,
+                 responsible=?,
+                 po_name=?,
+                 object=?,
+                 works_count=?,
+                 responsibility_zone=?,
+                 start_time=?,
+                 end_time=?,
+                 personnel_count=?,
+                 checks_count=?,
+                 violations_count=?,
+                 violation_type=?,
+                 kpb_violation=?,
+                 kpb_detected=?,
+                 act_issued=?
+                 WHERE id=?''', data)
+            conn.commit()
+        except sqlite3.Error as e:
+            raise ValueError(f"Ошибка при обновлении записи: {e}")
+        finally:
+            conn.close()
         
 # --------------------------
 # Главное меню
 # --------------------------
+
+# CSS для скрытия бокового меню при нажатии на кнопку
+hide_sidebar_style = """
+<style>
+    /* Скрываем боковое меню при нажатии на кнопку */
+    .css-1d391kg {
+        display: none;
+    }
+</style>
+"""
+
+# Применяем CSS
+st.markdown(hide_sidebar_style, unsafe_allow_html=True)
 
 def main_menu():
     st.sidebar.title("Главное меню")
@@ -108,12 +150,15 @@ def main_menu():
 
     if st.sidebar.button("📋 Проверки ОТиПБ"):
         st.session_state.module = "module1"
+        st.markdown(hide_sidebar_style, unsafe_allow_html=True)  # Скрываем боковое меню
     
     if st.sidebar.button("🏗️ Проверки в СП"):
         st.session_state.module = "module2"
+        st.markdown(hide_sidebar_style, unsafe_allow_html=True)  # Скрываем боковое меню
     
     if st.sidebar.button("🏢 Список ПО"):
         st.session_state.module = "module3"
+        st.markdown(hide_sidebar_style, unsafe_allow_html=True)  # Скрываем боковое меню
     
     if st.sidebar.button("🚪 Выход"):
         st.session_state.module = None
@@ -400,15 +445,20 @@ def module2():
     def add_record(data):
         conn = sqlite3.connect(SOFTWARE_DB)
         c = conn.cursor()
-        c.execute('''INSERT INTO checks 
+        try:
+            c.execute('''INSERT INTO checks 
                      (date, sp_name, responsible, po_name, object, works_count, responsibility_zone, 
                       start_time, end_time, personnel_count, checks_count, violations_count, 
                       violation_type, kpb_violation, kpb_detected, act_issued) 
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
-        record_id = c.lastrowid
-        conn.commit()
-        conn.close()
-        return record_id
+            record_id = c.lastrowid
+            conn.commit()
+            st.success("Запись успешно добавлена!")
+        except sqlite3.Error as e:
+            st.error(f"Ошибка при добавлении записи: {e}")
+        finally:
+            conn.close()
+            return record_id
 
     def save_photos(record_id, uploaded_files):
         if not uploaded_files:
@@ -460,33 +510,7 @@ def module2():
         conn.close()
         return records
 
-    def update_record(data):
-        conn = sqlite3.connect(SOFTWARE_DB)
-        c = conn.cursor()
-        try:
-            c.execute('''UPDATE checks SET
-                 date=?,
-                 sp_name=?,
-                 responsible=?,
-                 po_name=?,
-                 object=?,
-                 works_count=?,
-                 responsibility_zone=?,
-                 start_time=?,
-                 end_time=?,
-                 personnel_count=?,
-                 checks_count=?,
-                 violations_count=?,
-                 violation_type=?,
-                 kpb_violation=?,
-                 kpb_detected=?,
-                 act_issued=?
-                 WHERE id=?''', data)
-            conn.commit()
-        except sqlite3.Error as e:
-            st.error(f"Ошибка при обновлении записи: {e}")
-        finally:
-            conn.close()
+
         
     # Новая функция для получения данных с путями к фото
     def get_all_data():
@@ -628,82 +652,81 @@ def module2():
         else:
             st.warning("Нет фото для этой записи")
 
-          
-     if st.button("✏️ Редактирование записи"):
-        record = get_record_by_id(selected_id)  # Получаем данные записи по ID
-        if record:
-                with st.form("edit_form"):
-                    st.write("Редактирование записи ID:", selected_id)
+        # Заглушка на кнопку редактирование 
+       # if st.button("✏️ Редактирование записи"):
+        # record = get_record_by_id(selected_id)  # Получаем данные записи по ID
+       #  if record:
+          #       with st.form("edit_form"):
+          #           st.write("Редактирование записи ID:", selected_id)
                     # Предзаполняем поля формы текущими данными
-                    edit_date = st.date_input("Дата", datetime.strptime(record[1], "%d.%m.%Y"))
-                    edit_sp_name = st.selectbox("СП", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"], index=["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"].index(record[2]))
-                    edit_responsible = st.text_input("Ответственный", value=record[3])
-                    edit_po_name = st.selectbox("ПО", get_organizations(), index=get_organizations().index(record[4]))
-                    edit_object = st.text_input("Объект", value=record[5])
-                    edit_works_count = st.number_input("Кол-во работ", value=record[6])
-                    edit_responsibility_zone = st.text_input("Зона ответственности", value=record[7])
-                    edit_start_time = st.time_input("Начало работ", value=datetime.strptime(record[8], "%H:%M").time())
-                    edit_end_time = st.time_input("Окончание работ", value=datetime.strptime(record[9], "%H:%M").time())
-                    edit_personnel_count = st.number_input("Кол-во персонала", value=record[10])
-                    edit_checks_count = st.number_input("Проведено проверок", value=record[11])
-                    edit_violations_count = st.number_input("Количество нарушений", value=record[12])
-                    edit_violation_type = st.selectbox("Тип нарушения", [
-                        "Работы на высоте", "Огневые работы/Пожарная безопасность", 
-                        "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
-                        "Работы в газоопасн. местах/замкнутом простр-ве", 
-                        "Земляные работы", "Документы/Допуски и удостоверения", 
-                        "Исправность инструментов и приспособлений", 
-                        "Применение/Исправность СИЗ", 
-                        "Содержание территории/рабочих мест", 
-                        "Безопасность дорожного движения", "Нарушений не выявлено"
-                    ], index=[
-                        "Работы на высоте", "Огневые работы/Пожарная безопасность", 
-                        "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
-                        "Работы в газоопасн. местах/замкнутом простр-ве", 
-                        "Земляные работы", "Документы/Допуски и удостоверения", 
-                        "Исправность инструментов и приспособлений", 
-                        "Применение/Исправность СИЗ", 
-                        "Содержание территории/рабочих мест", 
-                        "Безопасность дорожного движения", "Нарушений не выявлено"
-                    ].index(record[13]))
-                    edit_kpb_violation = st.selectbox("Нарушения КПБ", ["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"], index=["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"].index(record[14]))
-                    edit_act_issued = st.selectbox("Акт оформлен", ["Нет", "Да"], index=0 if record[16] == 0 else 1)
+          #           edit_date = st.date_input("Дата", datetime.strptime(record[1], "%d.%m.%Y"))
+          #           edit_sp_name = st.selectbox("СП", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"], index=["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"].index(record[2]))
+          #           edit_responsible = st.text_input("Ответственный", value=record[3])
+          #           edit_po_name = st.selectbox("ПО", get_organizations(), index=get_organizations().index(record[4]))
+            #         edit_object = st.text_input("Объект", value=record[5])
+              #       edit_works_count = st.number_input("Кол-во работ", value=record[6])
+                #     edit_responsibility_zone = st.text_input("Зона ответственности", value=record[7])
+                  #   edit_start_time = st.time_input("Начало работ", value=datetime.strptime(record[8], "%H:%M").time())
+                    # edit_end_time = st.time_input("Окончание работ", value=datetime.strptime(record[9], "%H:%M").time())
+                   #  edit_personnel_count = st.number_input("Кол-во персонала", value=record[10])
+                 #    edit_checks_count = st.number_input("Проведено проверок", value=record[11])
+                   #  edit_violations_count = st.number_input("Количество нарушений", value=record[12])
+                   #  edit_violation_type = st.selectbox("Тип нарушения", [
+                 #        "Работы на высоте", "Огневые работы/Пожарная безопасность", 
+                   #      "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
+                 #        "Работы в газоопасн. местах/замкнутом простр-ве", 
+                 #        "Земляные работы", "Документы/Допуски и удостоверения", 
+                #         "Исправность инструментов и приспособлений", 
+                 #        "Применение/Исправность СИЗ", 
+                #         "Содержание территории/рабочих мест", 
+                #         "Безопасность дорожного движения", "Нарушений не выявлено"
+                    # ], index=[
+                #         "Работы на высоте", "Огневые работы/Пожарная безопасность", 
+                #         "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
+                #         "Работы в газоопасн. местах/замкнутом простр-ве", 
+                #         "Земляные работы", "Документы/Допуски и удостоверения", 
+                 #        "Исправность инструментов и приспособлений", 
+                 #        "Применение/Исправность СИЗ", 
+                 #        "Содержание территории/рабочих мест", 
+                 #        "Безопасность дорожного движения", "Нарушений не выявлено"
+               #      ].index(record[13]))
+               #      edit_kpb_violation = st.selectbox("Нарушения КПБ", ["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"], index=["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"].index(record[14]))
+                #     edit_act_issued = st.selectbox("Акт оформлен", ["Нет", "Да"], index=0 if record[16] == 0 else 1)
 
                     
-                    edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
+                 #    edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
 
-                    if st.form_submit_button("Сохранить изменения"):
-                        update_data = (
-                            edit_date.strftime("%d.%m.%Y"),
-                            edit_sp_name,
-                            edit_responsible,
-                            edit_po_name,
-                            edit_object,
-                            edit_works_count,
-                            edit_responsibility_zone,
-                            edit_start_time.strftime("%H:%M"),
-                            edit_end_time.strftime("%H:%M"),
-                            edit_personnel_count,
-                            edit_checks_count,
-                            edit_violations_count,
-                            edit_violation_type,
-                            edit_kpb_violation,
-                            1 if kpb_violation in ("Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Защити себя от падения", "Получи допуск") else 0,
-                            1 if edit_act_issued =="Да" else 0,
-                            selected_id
-                        )
+                 #    if st.form_submit_button("Сохранить изменения"):
+                 #        data =(
+                  #           edit_date.strftime("%d.%m.%Y"),
+                  #           edit_sp_name,
+                  #           edit_responsible,
+                  #           edit_po_name,
+                  #           edit_object,
+                  #           edit_works_count,
+                  #           edit_responsibility_zone,
+                  #           edit_start_time.strftime("%H:%M"),
+                   #          edit_end_time.strftime("%H:%M"),
+                   #          edit_personnel_count,
+                   #          edit_checks_count,
+                   #          edit_violations_count,
+                   #          edit_violation_type,
+                   #          edit_kpb_violation,
+                   #          1 if kpb_violation in ("Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Защити себя от падения", "Получи допуск") else 0,
+                    #         1 if edit_act_issued =="Да" else 0,
+                    #         selected_id)
 
-                            # Выводим данные для отладки
-                        st.write("Данные для обновления:", update_data)
-                        try:
-                            update_record(update_data)
-                            st.success("Изменения сохранены!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Ошибка: {str(e)}")
-        else:
-             st.error("Запись не найдена.")
-                
+                    # Логируем данные
+                    
+
+                    # Удаляем старую запись
+                    
+                    # Добавляем новую запись
+                  #   record_id = add_record(data)
+                  #   st.success("Изменения сохранены!")
+                    # st.rerun()"
+    
+
      if st.button("📥 Экспорт в Excel"):
 
             # Создаем новый Excel-файл
