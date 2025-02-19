@@ -304,13 +304,29 @@ def module1():
             st.rerun()
             
         if cols[2].button("📥 Экспорт в Excel"):
-            csv = df.to_csv(index=False).encode('utf-8')
+            # Создаем новый Excel-файл
+            wb = Workbook()
+            ws = wb.active
+            # Заголовки столбцов
+            ws.append(df.columns.tolist())
+    
+            # Данные
+            for row in df.itertuples(index=False):
+                ws.append(row)
+    
+            # Сохраняем файл в буфер
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+
+            # Предлагаем пользователю скачать файл
             st.download_button(
-                label="Скачать CSV",
-                data=csv,
-                file_name='inspections.csv',
-                mime='text/csv'
-            )
+                label="⬇️ Скачать Excel",
+                data=output,
+                file_name='inspections.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    
+
         
         if cols[3].button("📄 Сформировать акт"):
             record = df[df['id'] == selected_id].iloc[0].to_dict()
@@ -535,7 +551,7 @@ def module2():
                     violations_count,
                     violation_type,
                     kpb_violation,
-                    1 if kpb_violation else 0,
+                    1 if kpb_violation in ("Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Защити себя от падения", "Получи допуск") else 0,
                     1 if act_issued == "Да" else 0
                 )
                 record_id = add_record(data)
@@ -584,7 +600,7 @@ def module2():
             st.warning("Нет фото для этой записи")
 
           
-     if cols[2].button("✏️ Редактирование записи"):
+     if st.button("✏️ Редактирование записи"):
         with st.form("edit_form"):
             selected_id = st.number_input("ID записи", min_value=1)
             edit_date = st.date_input("Новая дата", datetime.today())
@@ -601,7 +617,30 @@ def module2():
                 update_record(update_data)
                 st.success("Изменения сохранены!")
                 st.rerun()
+                
+     if st.button("📥 Экспорт в Excel"):
 
+            # Создаем новый Excel-файл
+            wb = Workbook()
+            ws = wb.active
+            # Заголовки столбцов
+            ws.append(df.columns.tolist())
+    
+            # Данные
+            for row in df.itertuples(index=False):
+                ws.append(row)
+    
+            # Сохраняем файл в буфер
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+
+            # Предлагаем пользователю скачать файл
+            st.download_button(
+                label="⬇️ Скачать Excel",
+                data=output,
+                file_name='sp_checks.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # Аналитика
     with st.expander("📈 Аналитика и отчеты"):
@@ -638,7 +677,8 @@ def module2():
             ax.set_title(f"Динамика нарушений для {selected_po}")
             ax.grid(True)
             st.pyplot(fig)
-            
+
+            # Выгрузка в excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name='Данные', index=False)
