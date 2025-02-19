@@ -89,6 +89,14 @@ def update_organization(old_name, new_name):
         conn.close()
 
         
+def get_record_by_id(record_id):
+    conn = sqlite3.connect(SOFTWARE_DB)
+    c = conn.cursor()
+    c.execute("SELECT * FROM checks WHERE id=?", (record_id,))
+    record = c.fetchone()
+    conn.close()
+    return record
+        
 # --------------------------
 # Главное меню
 # --------------------------
@@ -455,9 +463,30 @@ def module2():
     def update_record(data):
         conn = sqlite3.connect(SOFTWARE_DB)
         c = conn.cursor()
-        c.execute("UPDATE checks SET date=?, sp_name=?, responsible=? WHERE id=?", data)
-        conn.commit()
-        conn.close()
+        try:
+            c.execute('''UPDATE checks SET
+                 date=?,
+                 sp_name=?,
+                 responsible=?,
+                 po_name=?,
+                 object=?,
+                 works_count=?,
+                 responsibility_zone=?,
+                 start_time=?,
+                 end_time=?,
+                 personnel_count=?,
+                 checks_count=?,
+                 violations_count=?,
+                 violation_type=?,
+                 kpb_violation=?,
+                 kpb_detected=?,
+                 act_issued=?
+                 WHERE id=?''', data)
+            conn.commit()
+        except sqlite3.Error as e:
+            st.error(f"Ошибка при обновлении записи: {e}")
+        finally:
+            conn.close()
         
     # Новая функция для получения данных с путями к фото
     def get_all_data():
@@ -601,22 +630,79 @@ def module2():
 
           
      if st.button("✏️ Редактирование записи"):
-        with st.form("edit_form"):
-            selected_id = st.number_input("ID записи", min_value=1)
-            edit_date = st.date_input("Новая дата", datetime.today())
-            edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
-            edit_sp_name = st.selectbox("Новое СП", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1","КЦ-2","ЦХПП","ЦГП","УЖДТ"])
-            edit_responsible = st.text_input("Новый ответственный")
-            if st.form_submit_button("Сохранить изменения"):
-                update_data = (
-                    edit_date_str,  # Используем отформатированную дату
-                    edit_sp_name,
-                    edit_responsible,
-                    selected_id
-                )
-                update_record(update_data)
-                st.success("Изменения сохранены!")
-                st.rerun()
+        record = get_record_by_id(selected_id)  # Получаем данные записи по ID
+        if record:
+                with st.form("edit_form"):
+                    st.write("Редактирование записи ID:", selected_id)
+                    # Предзаполняем поля формы текущими данными
+                    edit_date = st.date_input("Дата", datetime.strptime(record[1], "%d.%m.%Y"))
+                    edit_sp_name = st.selectbox("СП", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"], index=["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1", "КЦ-2", "ЦХПП", "ЦГП", "УЖДТ"].index(record[2]))
+                    edit_responsible = st.text_input("Ответственный", value=record[3])
+                    edit_po_name = st.selectbox("ПО", get_organizations(), index=get_organizations().index(record[4]))
+                    edit_object = st.text_input("Объект", value=record[5])
+                    edit_works_count = st.number_input("Кол-во работ", value=record[6])
+                    edit_responsibility_zone = st.text_input("Зона ответственности", value=record[7])
+                    edit_start_time = st.time_input("Начало работ", value=datetime.strptime(record[8], "%H:%M").time())
+                    edit_end_time = st.time_input("Окончание работ", value=datetime.strptime(record[9], "%H:%M").time())
+                    edit_personnel_count = st.number_input("Кол-во персонала", value=record[10])
+                    edit_checks_count = st.number_input("Проведено проверок", value=record[11])
+                    edit_violations_count = st.number_input("Количество нарушений", value=record[12])
+                    edit_violation_type = st.selectbox("Тип нарушения", [
+                        "Работы на высоте", "Огневые работы/Пожарная безопасность", 
+                        "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
+                        "Работы в газоопасн. местах/замкнутом простр-ве", 
+                        "Земляные работы", "Документы/Допуски и удостоверения", 
+                        "Исправность инструментов и приспособлений", 
+                        "Применение/Исправность СИЗ", 
+                        "Содержание территории/рабочих мест", 
+                        "Безопасность дорожного движения", "Нарушений не выявлено"
+                    ], index=[
+                        "Работы на высоте", "Огневые работы/Пожарная безопасность", 
+                        "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
+                        "Работы в газоопасн. местах/замкнутом простр-ве", 
+                        "Земляные работы", "Документы/Допуски и удостоверения", 
+                        "Исправность инструментов и приспособлений", 
+                        "Применение/Исправность СИЗ", 
+                        "Содержание территории/рабочих мест", 
+                        "Безопасность дорожного движения", "Нарушений не выявлено"
+                    ].index(record[13]))
+                    edit_kpb_violation = st.selectbox("Нарушения КПБ", ["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"], index=["Нет", "Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Получи допуск", "Защити себя от падения"].index(record[14]))
+                    edit_act_issued = st.selectbox("Акт оформлен", ["Нет", "Да"], index=0 if record[16] == 0 else 1)
+
+                    
+                    edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
+
+                    if st.form_submit_button("Сохранить изменения"):
+                        update_data = (
+                            edit_date.strftime("%d.%m.%Y"),
+                            edit_sp_name,
+                            edit_responsible,
+                            edit_po_name,
+                            edit_object,
+                            edit_works_count,
+                            edit_responsibility_zone,
+                            edit_start_time.strftime("%H:%M"),
+                            edit_end_time.strftime("%H:%M"),
+                            edit_personnel_count,
+                            edit_checks_count,
+                            edit_violations_count,
+                            edit_violation_type,
+                            edit_kpb_violation,
+                            1 if kpb_violation in ("Нет алкоголю и наркотикам", "Сообщай о происшествиях", "Защити себя от падения", "Получи допуск") else 0,
+                            1 if edit_act_issued =="Да" else 0,
+                            selected_id
+                        )
+
+                            # Выводим данные для отладки
+                        st.write("Данные для обновления:", update_data)
+                        try:
+                            update_record(update_data)
+                            st.success("Изменения сохранены!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Ошибка: {str(e)}")
+        else:
+             st.error("Запись не найдена.")
                 
      if st.button("📥 Экспорт в Excel"):
 
