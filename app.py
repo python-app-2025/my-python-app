@@ -208,12 +208,9 @@ def module1():
             violator_name = cols_v[0].text_input("ФИО Нарушителя*")
             violation_description = cols_v[1].text_area("Описание нарушения*")
 
-            # Инициализация состояния
-            if "violation_type" not in st.session_state:
-                st.session_state.violation_type = "Работы на высоте"
             
             cols2 = st.columns(2)
-            st.session_state.violation_type = cols2[0].selectbox(
+            violation_type = cols2[0].selectbox(
                 "Тип нарушения*", [
                 "Работы на высоте", "Огневые работы/Пожарная безопасность", 
                 "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
@@ -225,24 +222,24 @@ def module1():
                 "Безопасность дорожного движения"
             ])
             
-            st.write(f"Выбранный тип нарушения: {st.session_state.violation_type}")
+            st.write(f"Выбранный тип нарушения: {violation_type}")
             
             # Формируем список категорий в зависимости от выбранного типа нарушения
-            if st.session_state.violation_type == "Работы на высоте":
+            if violation_type == "Работы на высоте":
                 categories = ["СИЗ", "Леса"]
-            elif st.session_state.violation_type == "Огневые работы/Пожарная безопасность":
+            elif violation_type == "Огневые работы/Пожарная безопасность":
                 categories = ["Огневые работы", "Пожарная безопасность"]
-            elif st.session_state.violation_type == "Грузоподъёмные работы/Работа с ПС":
+            elif violation_type == "Грузоподъёмные работы/Работа с ПС":
                 categories = ["Краны", "Подъемники"]
             else:
                 categories = ["другое"]
 
             # Второй выпадающий список, который зависит от выбора в первом
-            selected_category = cols2[1].selectbox("Категория нарушения*", categories)
+            violation_category = cols2[1].selectbox("Категория нарушения*", categories)
             
 
             # Вывод выбранных значений
-            st.write(f"Вы выбрали: {st.session_state.violation_type} и {selected_category}")
+            st.write(f"Вы выбрали: {violation_type} и {violation_category}")
 
             cols3 = st.columns(3)
             risk_level = cols3[1].selectbox(
