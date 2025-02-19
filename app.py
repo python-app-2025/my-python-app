@@ -194,10 +194,10 @@ def module1():
             inspection_date = cols[0].date_input("Дата проверки*", datetime.today())
             object_val = cols[1].selectbox(
                 "Объект проверки*",
-                ["УТЭЦ-2", "АНГЦ-5", "Стан 2000", "КЦ-1", "КЦ-2"]
+                ["УТЭЦ-2", "АНГЦ-5", "Стан 2000", "КЦ-1", "КЦ-2", "АТУ", "ДЦ-1", "ДЦ-2","ЦХПП","ЦГП","УЖДТ"]
             )
             
-            section = cols[0].text_input("Участок проверки*")
+            section = cols[0].selectbox("Участок проверки*", ["Участок монтажа м\к","Сварочный участок","Участок установки оборудования","Ось 11-3","Отметка +45.100","Маслоподвал"])
             organization = cols[1].selectbox(
                 "Наименование организации*", 
                 get_organizations(),
@@ -219,27 +219,12 @@ def module1():
                 "Исправность инструментов и приспособлений", 
                 "Применение/Исправность СИЗ", 
                 "Содержание территории/рабочих мест", 
-                "Безопасность дорожного движения"
-            ])
+                "Безопасность дорожного движения"])
             
-            st.write(f"Выбранный тип нарушения: {violation_type}")
             
-            # Формируем список категорий в зависимости от выбранного типа нарушения
-            if violation_type == "Работы на высоте":
-                categories = ["СИЗ", "Леса"]
-            elif violation_type == "Огневые работы/Пожарная безопасность":
-                categories = ["Огневые работы", "Пожарная безопасность"]
-            elif violation_type == "Грузоподъёмные работы/Работа с ПС":
-                categories = ["Краны", "Подъемники"]
-            else:
-                categories = ["другое"]
-
-            # Второй выпадающий список, который зависит от выбора в первом
-            violation_category = cols2[1].selectbox("Категория нарушения*", categories)
+            # Второй выпадающий список
+            violation_category = cols2[1].selectbox("Категория нарушения*", ["Применение СИЗ", "Обучение и аттестации", "ППР", "Леса", "Анкерные линии", "Другое"])
             
-
-            # Вывод выбранных значений
-            st.write(f"Вы выбрали: {violation_type} и {violation_category}")
 
             cols3 = st.columns(3)
             risk_level = cols3[1].selectbox(
@@ -249,7 +234,7 @@ def module1():
             
             inspector_name = cols_v[0].selectbox(
                 "Проверяющий*", 
-                ["Супервайзер Иванов", "Специалист Петров"]
+                ["Супервайзер ИТК Иванов И.И.", "Специалист ОТиПБ Петров П.П.", "Специалист ОТ ПО Сидоров С.С."]
             )
             elimination_date = cols3[2].date_input(
                 "Дата устранения*", 
@@ -257,7 +242,7 @@ def module1():
             )
             elimination_status = cols3[0].selectbox(
                 "Статус устранения*", 
-                ["устранено", "не устранено"]
+                ["не устранено", "устранено"]
             )
             
             uploaded_photo = st.file_uploader(
@@ -604,7 +589,7 @@ def module2():
             selected_id = st.number_input("ID записи", min_value=1)
             edit_date = st.date_input("Новая дата", datetime.today())
             edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
-            edit_sp_name = st.selectbox("Новое СП", ["АТУ", "УЖДТ"])
+            edit_sp_name = st.selectbox("Новое СП", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1","КЦ-2","ЦХПП","ЦГП","УЖДТ"])
             edit_responsible = st.text_input("Новый ответственный")
             if st.form_submit_button("Сохранить изменения"):
                 update_data = (
