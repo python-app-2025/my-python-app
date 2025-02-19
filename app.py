@@ -1,189 +1,220 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import matplotlib.pyplot as plt
+from datetime import datetime, time
+from docx import Document
 import io
 import os
-from datetime import datetime
+import uuid
+import matplotlib.pyplot as plt
+from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 
-def init_db():
-    conn = sqlite3.connect('software_checks.db')
+
+
+# Настройки страницы
+st.set_page_config(
+    page_title="Проверки ОТиПБ",
+    page_icon="✅",
+    layout="wide"
+)
+
+
+# Общие настройки
+DATABASE_NAME = "inspections.db"
+COMMON_DB = "common.db"
+SOFTWARE_DB = "software_checks.db"
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# --------------------------
+# Общие функции для работы с организациями
+# --------------------------
+
+def init_common_db():
+    conn = sqlite3.connect(COMMON_DB)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS checks
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  date TEXT,
-                  sp_name TEXT,
-                  responsible TEXT,
-                  po_name TEXT,
-                  object TEXT,
-                  works_count INTEGER,
-                  responsibility_zone TEXT,
-                  start_time TEXT,
-                  end_time TEXT,
-                  personnel_count INTEGER,
-                  checks_count INTEGER,
-                  violations_count INTEGER,
-                  violation_type TEXT,
-                  kpb_violation TEXT,
-                  kpb_detected INTEGER,
-                  act_issued INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS organizations
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS photos
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  record_id INTEGER,
-                  file_path TEXT,
-                  FOREIGN KEY(record_id) REFERENCES checks(id))''')
+                  name TEXT UNIQUE)''')
     conn.commit()
     conn.close()
 
 def add_organization(name):
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO organizations (name) VALUES (?)", (name,))
-    conn.commit()
-    conn.close()
+    conn = sqlite3.connect(COMMON_DB)
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO organizations (name) VALUES (?)", (name,))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise ValueError("Организация с таким названием уже существует")
+    finally:
+        conn.close()
 
 def get_organizations():
-    conn = sqlite3.connect('software_checks.db')
+    conn = sqlite3.connect(COMMON_DB)
     c = conn.cursor()
-    c.execute("SELECT name FROM organizations")
-    organizations = c.fetchall()
+    c.execute("SELECT name FROM organizations ORDER BY name")
+    organizations = [row[0] for row in c.fetchall()]
     conn.close()
-    return [org[0] for org in organizations]
+    return organizations
 
-def add_record(data):
-    conn = sqlite3.connect('software_checks.db')
+def delete_organization(name):
+    conn = sqlite3.connect(COMMON_DB)
     c = conn.cursor()
-    c.execute('''INSERT INTO checks 
-                 (date, sp_name, responsible, po_name, object, works_count, responsibility_zone, 
-                  start_time, end_time, personnel_count, checks_count, violations_count, 
-                  violation_type, kpb_violation, kpb_detected, act_issued) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
-    record_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return record_id
-
-def save_photos(record_id, uploaded_files):
-    if not uploaded_files:
-        return
-    save_dir = f"uploads/{record_id}"
-    os.makedirs(save_dir, exist_ok=True)
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    for uploaded_file in uploaded_files:
-        file_path = os.path.join(save_dir, uploaded_file.name)
-        with open(file_path, 'wb') as f:
-            f.write(uploaded_file.getbuffer())
-        c.execute("INSERT INTO photos (record_id, file_path) VALUES (?, ?)", 
-                 (record_id, file_path))
+    c.execute("DELETE FROM organizations WHERE name=?", (name,))
     conn.commit()
     conn.close()
 
-def get_photos(record_id):
-    conn = sqlite3.connect('software_checks.db')
+# Обновление организации
+def update_organization(old_name, new_name):
+    if not old_name or not new_name:
+        raise ValueError("Название организации не может быть пустым.")
+    
+    if old_name == new_name:
+        raise ValueError("Новое название должно отличаться от старого.")
+    
+    conn = sqlite3.connect(COMMON_DB)
     c = conn.cursor()
-    c.execute("SELECT file_path FROM photos WHERE record_id=?", (record_id,))
-    photos = [row[0] for row in c.fetchall()]
-    conn.close()
-    return photos
-
-def delete_record(record_id):
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    
-    # Delete photos from filesystem
-    photos = get_photos(record_id)
-    for photo in photos:
-        if os.path.exists(photo):
-            os.remove(photo)
-    
-    # Delete photo records from DB
-    c.execute("DELETE FROM photos WHERE record_id=?", (record_id,))
-    
-    # Delete main record
-    c.execute("DELETE FROM checks WHERE id=?", (record_id,))
-    
-    conn.commit()
-    conn.close()
-    
-    # Delete directory if empty
-    dir_path = f"uploads/{record_id}"
-    if os.path.exists(dir_path):
-        try:
-            os.rmdir(dir_path)
-        except OSError:
-            pass
-
-def get_records():
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM checks")
-    records = c.fetchall()
-    conn.close()
-    return records
-
-def update_record(data):
-    conn = sqlite3.connect('software_checks.db')
-    c = conn.cursor()
-    c.execute("UPDATE checks SET date=?, sp_name=?, responsible=? WHERE id=?", data)
-    conn.commit()
-    conn.close()
-
-def main():
-    st.set_page_config(page_title="Проверки ПО в СП", layout="wide")
-    init_db()
-    if not os.path.exists('uploads'):
-        os.makedirs('uploads')
-    
-    st.title("Проверки ПО в СП - Веб версия")
-    
-    # Секция управления организациями
-    with st.expander("Управление организациями (ПО)"):
-        with st.form("org_form"):
-            new_po = st.text_input("Добавить новое ПО")
-            if st.form_submit_button("Добавить"):
-                if new_po:
-                    add_organization(new_po)
-                    st.rerun()
+    try:
+        c.execute("SELECT name FROM organizations WHERE name = ?", (new_name,))
+        if c.fetchone():
+            raise ValueError(f"Организация с названием '{new_name}' уже существует.")
         
-        po_list = get_organizations()
-        if po_list:
-            st.write("Список доступных ПО:")
-            st.write(po_list)
-        else:
-            st.warning("Нет зарегистрированных организаций")
+        c.execute("UPDATE organizations SET name = ? WHERE name = ?", (new_name, old_name))
+        conn.commit()
+    except sqlite3.Error as e:
+        raise ValueError(f"Ошибка при обновлении организации: {e}")
+    finally:
+        conn.close()
 
-    # Секция для добавления новой записи
-    with st.expander("Добавить новую запись", expanded=True):
-        with st.form("add_record_form"):
+        
+# --------------------------
+# Главное меню
+# --------------------------
+
+def main_menu():
+    st.sidebar.title("Главное меню")
+    if "module" not in st.session_state:
+        st.session_state.module = None
+
+    if st.sidebar.button("📋 Проверки ОТиПБ"):
+        st.session_state.module = "module1"
+    
+    if st.sidebar.button("🏗️ Проверки в СП"):
+        st.session_state.module = "module2"
+    
+    if st.sidebar.button("🏢 Список ПО"):
+        st.session_state.module = "module3"
+    
+    if st.sidebar.button("🚪 Выход"):
+        st.session_state.module = None
+        st.rerun()
+
+# --------------------------
+# Модуль 1: Проверки ОТиПБ
+# --------------------------
+
+def module1():
+    st.title("📋 Управление проверками ОТиПБ")
+
+    # Функции БД
+    def create_db():
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS inspections
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      inspection_date TEXT,
+                      object TEXT,
+                      section TEXT,
+                      organization TEXT,
+                      violator_name TEXT,
+                      violation_description TEXT,
+                      violation_type TEXT,
+                      violation_category TEXT,
+                      risk_level TEXT,
+                      inspector_name TEXT,
+                      elimination_date TEXT,
+                      elimination_status TEXT,
+                      photo_path TEXT)''')
+        conn.commit()
+        conn.close()
+
+    def add_to_db(data):
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        c.execute('''INSERT INTO inspections VALUES 
+                  (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?)''', data)
+        conn.commit()
+        conn.close()
+
+    def get_all_data():
+        conn = sqlite3.connect(DATABASE_NAME)
+        df = pd.read_sql('SELECT * FROM inspections', conn)
+        conn.close()
+        return df
+
+    def update_db(data):
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        c.execute('''UPDATE inspections SET
+                  inspection_date=?,
+                  object=?,
+                  section=?,
+                  organization=?,
+                  violator_name=?,
+                  violation_description=?,
+                  violation_type=?,
+                  violation_category=?,
+                  risk_level=?,
+                  inspector_name=?,
+                  elimination_date=?,
+                  elimination_status=?,
+                  photo_path=?
+                  WHERE id=?''', data)
+        conn.commit()
+        conn.close()
+
+    def delete_from_db(record_id):
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        c.execute('SELECT photo_path FROM inspections WHERE id=?', (record_id,))
+        result = c.fetchone()
+        if result and result[0] and os.path.exists(result[0]):
+            os.remove(result[0])
+        c.execute('DELETE FROM inspections WHERE id=?', (record_id,))
+        conn.commit()
+        conn.close()
+
+    # Форма добавления записи
+    create_db()
+    with st.expander("➕ Добавить новую запись", expanded=True):
+        with st.form("add_form", clear_on_submit=True):
             cols = st.columns(2)
-            date = cols[0].date_input("Дата*")
-            sp_name = cols[1].selectbox("Наименование СП*", ["АТУ", "УЖДТ"])
+            inspection_date = cols[0].date_input("Дата проверки*", datetime.today())
+            object_val = cols[1].selectbox(
+                "Объект проверки*",
+                ["УТЭЦ-2", "АНГЦ-5", "Стан 2000", "КЦ-1", "КЦ-2"]
+            )
             
-            responsible = st.text_input("Ответственный от СП*")
-            po_name = st.selectbox("Наименование ПО*", get_organizations())
+            section = cols[0].text_input("Участок проверки*")
+            organization = cols[1].selectbox(
+                "Наименование организации*", 
+                get_organizations(),
+                index=0
+            )
+            
+            cols_v = st.columns(2)
+            violator_name = cols_v[0].text_input("ФИО Нарушителя*")
+            violation_description = cols_v[1].text_area("Описание нарушения*")
+
+            # Инициализация состояния
+            if "violation_type" not in st.session_state:
+                st.session_state.violation_type = "Работы на высоте"
             
             cols2 = st.columns(2)
-            object = cols2[0].text_input("Объект/Участок")
-            works_count = cols2[1].number_input("Кол-во выполняемых работ*", min_value=0)
-            
-            responsibility_zone = st.text_input("Зона ответственности (СП)")
-            
-            cols3 = st.columns(2)
-            start_time = cols3[0].time_input("Время начала работ*")
-            end_time = cols3[1].time_input("Время окончания работ*")
-            
-            cols4 = st.columns(2)
-            personnel_count = cols4[0].number_input("Кол-во персонала ПО*", min_value=0)
-            checks_count = cols4[1].number_input("Проведено проверок*", min_value=0)
-            
-            violations_count = st.number_input("Количество нарушений*", min_value=0)
-            
-            violation_type = st.selectbox("Тип нарушения*", [
+            st.session_state.violation_type = cols2[0].selectbox(
+                "Тип нарушения*", [
                 "Работы на высоте", "Огневые работы/Пожарная безопасность", 
                 "Грузоподъёмные работы/Работа с ПС", "Электробезопасность", 
                 "Работы в газоопасн. местах/замкнутом простр-ве", 
@@ -194,12 +225,311 @@ def main():
                 "Безопасность дорожного движения"
             ])
             
-            kpb_violation = st.selectbox("Нарушения КПБ*", [
-                "Нет алкоголю и наркотикам", "Сообщай о происшествиях", 
-                "Получи допуск", "Защити себя от падения"
+            st.write(f"Выбранный тип нарушения: {st.session_state.violation_type}")
+            
+            # Формируем список категорий в зависимости от выбранного типа нарушения
+            if st.session_state.violation_type == "Работы на высоте":
+                categories = ["СИЗ", "Леса"]
+            elif st.session_state.violation_type == "Огневые работы/Пожарная безопасность":
+                categories = ["Огневые работы", "Пожарная безопасность"]
+            elif st.session_state.violation_type == "Грузоподъёмные работы/Работа с ПС":
+                categories = ["Краны", "Подъемники"]
+            else:
+                categories = ["другое"]
+
+            # Второй выпадающий список, который зависит от выбора в первом
+            selected_category = cols2[1].selectbox("Категория нарушения*", categories)
+            
+
+            # Вывод выбранных значений
+            st.write(f"Вы выбрали: {st.session_state.violation_type} и {selected_category}")
+
+            cols3 = st.columns(3)
+            risk_level = cols3[1].selectbox(
+                "Уровень риска*", 
+                ["высокий", "средний", "низкий"]
+            )
+            
+            inspector_name = cols_v[0].selectbox(
+                "Проверяющий*", 
+                ["Супервайзер Иванов", "Специалист Петров"]
+            )
+            elimination_date = cols3[2].date_input(
+                "Дата устранения*", 
+                datetime.today()
+            )
+            elimination_status = cols3[0].selectbox(
+                "Статус устранения*", 
+                ["устранено", "не устранено"]
+            )
+            
+            uploaded_photo = st.file_uploader(
+                "Загрузить фото нарушения",
+                type=['jpg', 'jpeg', 'png'],
+                accept_multiple_files=False
+            )
+            
+            if st.form_submit_button("💾 Сохранить запись"):
+                photo_path = save_uploaded_file(uploaded_photo)
+                data = (
+                    inspection_date.strftime("%d.%m.%Y"),
+                    object_val,
+                    section,
+                    organization,
+                    violator_name,
+                    violation_description,
+                    violation_type,
+                    violation_category,
+                    risk_level,
+                    inspector_name,
+                    elimination_date.strftime("%d.%m.%Y"),
+                    elimination_status,
+                    photo_path
+                )
+                add_to_db(data)
+                st.success("Запись успешно сохранена!")
+                st.rerun()
+
+    # Таблица данных
+    st.subheader("📊 Список проверок")
+    df = get_all_data()
+    
+    if not df.empty:
+        edited_df = st.data_editor(
+            df,
+            column_config={
+                "photo_path": st.column_config.ImageColumn(
+                    "Фото",
+                    help="Загруженные изображения"
+                )
+            },
+            hide_index=True,
+            use_container_width=True,
+            disabled=df.columns.tolist()
+        )
+        
+        # Управление записями
+        cols = st.columns(4)
+        selected_id = cols[0].number_input(
+            "Введите ID записи", 
+            min_value=1,
+            max_value=df['id'].max()
+        )
+        
+        if cols[1].button("🗑️ Удалить запись"):
+            delete_from_db(selected_id)
+            st.success("Запись удалена!")
+            st.rerun()
+            
+        if cols[2].button("📥 Экспорт в Excel"):
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Скачать CSV",
+                data=csv,
+                file_name='inspections.csv',
+                mime='text/csv'
+            )
+        
+        if cols[3].button("📄 Сформировать акт"):
+            record = df[df['id'] == selected_id].iloc[0].to_dict()
+            doc_buffer = generate_act(record)
+            if doc_buffer:
+                st.download_button(
+                    label="⬇️ Скачать акт",
+                    data=doc_buffer,
+                    file_name=f"Акт_{record['id']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+        
+        # Просмотр фото
+        if selected_id:
+            record = df[df['id'] == selected_id]
+            if not record.empty:
+                photo_path = record.iloc[0]['photo_path']
+                if photo_path and os.path.exists(photo_path):
+                    st.image(photo_path, caption="Прикрепленное фото", width=300)
+                else:
+                    st.warning("Для этой записи нет прикрепленного фото")
+    else:
+        st.info("Нет данных для отображения")
+
+# --------------------------
+# Модуль 2: Проверки в СП
+# --------------------------
+
+def module2():
+    st.title("🏗️ Проверки в СП")
+
+
+    # Функции БД
+    def init_db():
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS checks
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      date TEXT,
+                      sp_name TEXT,
+                      responsible TEXT,
+                      po_name TEXT,
+                      object TEXT,
+                      works_count INTEGER,
+                      responsibility_zone TEXT,
+                      start_time TEXT,
+                      end_time TEXT,
+                      personnel_count INTEGER,
+                      checks_count INTEGER,
+                      violations_count INTEGER,
+                      violation_type TEXT,
+                      kpb_violation TEXT,
+                      kpb_detected INTEGER,
+                      act_issued INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS photos
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      record_id INTEGER,
+                      file_path TEXT,
+                      FOREIGN KEY(record_id) REFERENCES checks(id))''')
+        conn.commit()
+        conn.close()
+
+    def add_record(data):
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        c.execute('''INSERT INTO checks 
+                     (date, sp_name, responsible, po_name, object, works_count, responsibility_zone, 
+                      start_time, end_time, personnel_count, checks_count, violations_count, 
+                      violation_type, kpb_violation, kpb_detected, act_issued) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', data)
+        record_id = c.lastrowid
+        conn.commit()
+        conn.close()
+        return record_id
+
+    def save_photos(record_id, uploaded_files):
+        if not uploaded_files:
+            return
+        save_dir = f"uploads/{record_id}"
+        os.makedirs(save_dir, exist_ok=True)
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        for uploaded_file in uploaded_files:
+            file_path = os.path.join(save_dir, uploaded_file.name)
+            with open(file_path, 'wb') as f:
+                f.write(uploaded_file.getbuffer())
+            c.execute("INSERT INTO photos (record_id, file_path) VALUES (?, ?)", 
+                     (record_id, file_path))
+        conn.commit()
+        conn.close()
+
+    def get_photos(record_id):
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        c.execute("SELECT file_path FROM photos WHERE record_id=?", (record_id,))
+        photos = [row[0] for row in c.fetchall()]
+        conn.close()
+        return photos
+
+    def delete_record(record_id):
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        photos = get_photos(record_id)
+        for photo in photos:
+            if os.path.exists(photo):
+                os.remove(photo)
+        c.execute("DELETE FROM photos WHERE record_id=?", (record_id,))
+        c.execute("DELETE FROM checks WHERE id=?", (record_id,))
+        conn.commit()
+        conn.close()
+        dir_path = f"uploads/{record_id}"
+        if os.path.exists(dir_path):
+            try:
+                os.rmdir(dir_path)
+            except OSError:
+                pass
+
+    def get_records():
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        c.execute("SELECT * FROM checks")
+        records = c.fetchall()
+        conn.close()
+        return records
+
+    def update_record(data):
+        conn = sqlite3.connect(SOFTWARE_DB)
+        c = conn.cursor()
+        c.execute("UPDATE checks SET date=?, sp_name=?, responsible=? WHERE id=?", data)
+        conn.commit()
+        conn.close()
+        
+    # Новая функция для получения данных с путями к фото
+    def get_all_data():
+        conn = sqlite3.connect(SOFTWARE_DB)
+        df = pd.read_sql('''
+            SELECT c.*, GROUP_CONCAT(p.file_path) as photo_paths 
+            FROM checks c
+            LEFT JOIN photos p ON c.id = p.record_id
+            GROUP BY c.id
+        ''', conn)
+        conn.close()
+        df['photo_paths'] = df['photo_paths'].apply(lambda x: x.split(',') if x else [])
+        return df
+
+    
+    # Интерфейс модуля
+    init_db()
+    
+
+    # Форма добавления записи
+    with st.expander("➕ Добавить новую запись", expanded=False):
+        with st.form("add_record_form", clear_on_submit=True):
+            cols = st.columns(2)
+            date = cols[0].date_input("Дата*", datetime.today())
+            date_str = date.strftime("%d.%m.%Y")  # Форматируем дату
+            sp_name = cols[1].selectbox("Наименование СП*", ["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1","КЦ-2","ЦХПП","ЦГП","УЖДТ"])
+
+
+            cols1 = st.columns(3)
+            responsible = cols1[0].selectbox("Ответственный от СП*", ["Мастер Иванов И.И.", "Начальник участка Петров П.П.", "Главный специалист Сидоров С.С."])
+            object = cols1[1].selectbox("Объект/Участок", ["Участок-1", "Участок-2", "Участок-3", "Участок-4"])
+            responsibility_zone = cols1[2].selectbox("Зона ответственности (СП)",["АТУ", "ДЦ-1", "ДЦ-2", "КЦ-1","КЦ-2","ЦХПП","ЦГП","УЖДТ"])
+
+            cols2 = st.columns(3)
+            po_name = cols2[0].selectbox("Наименование ПО*", get_organizations())          
+            start_time = cols2[1].time_input("Время начала работ*", time(8, 0))
+            end_time = cols2[2].time_input("Время окончания работ*", time(17, 0))
+            
+            cols3 = st.columns(2)
+            personnel_count = cols3[0].number_input("Кол-во персонала ПО*", min_value=1)
+            works_count = cols3[1].number_input("Кол-во выполняемых работ*", min_value=1)
+
+            cols4 = st.columns(2)
+            checks_count = cols4[0].number_input("Проведено проверок*", min_value=1)
+            violations_count = cols4[1].number_input("Количество нарушений*", min_value=0)
+            
+            violation_type = st.selectbox("Тип нарушения*", [
+                "Работы на высоте", 
+                "Огневые работы/Пожарная безопасность", 
+                "Грузоподъёмные работы/Работа с ПС", 
+                "Электробезопасность", 
+                "Работы в газоопасн. местах/замкнутом простр-ве", 
+                "Земляные работы", 
+                "Документы/Допуски и удостоверения", 
+                "Исправность инструментов и приспособлений", 
+                "Применение/Исправность СИЗ", 
+                "Содержание территории/рабочих мест", 
+                "Безопасность дорожного движения", "Нарушений не выявлено"
+            ])
+
+
+            cols5 = st.columns(2)
+            kpb_violation = cols5[0].selectbox("Нарушения КПБ*", ["Нет",
+                "Нет алкоголю и наркотикам", 
+                "Сообщай о происшествиях", 
+                "Получи допуск", 
+                "Защити себя от падения"
             ])
             
-            act_issued = st.selectbox("Оформлен Акт*", ["Да", "Нет"])
+            act_issued = cols5[1].selectbox("Оформлен Акт*", ["Нет", "Да"])
             
             uploaded_files = st.file_uploader(
                 "Прикрепить фотографии",
@@ -207,9 +537,9 @@ def main():
                 accept_multiple_files=True
             )
             
-            if st.form_submit_button("Добавить запись"):
+            if st.form_submit_button("💾 Сохранить запись"):
                 data = (
-                    date.strftime("%d.%m.%Y"),
+                    date_str,  # Используем отформатированную дату
                     sp_name,
                     responsible,
                     po_name,
@@ -228,118 +558,103 @@ def main():
                 )
                 record_id = add_record(data)
                 save_photos(record_id, uploaded_files)
-                st.success("Запись успешно добавлена!")
+                st.success("Запись успешно сохранена!")
                 st.rerun()
 
-    # Секция управления записями
-    st.header("Управление записями")
-    
-    # Формы редактирования и удаления
-    with st.container():
-        cols = st.columns(2)
-        with cols[0]:
-            with st.form("edit_form"):
-                st.subheader("Редактирование записи")
-                selected_id = st.number_input("ID записи для редактирования", min_value=1)
-                edit_date = st.date_input("Новая дата")
-                edit_sp_name = st.selectbox("Новое наименование СП", ["АТУ", "УЖДТ"])
-                edit_responsible = st.text_input("Новый ответственный")
-                if st.form_submit_button("Сохранить изменения"):
-                    update_data = (
-                        edit_date.strftime("%d.%m.%Y"),
-                        edit_sp_name,
-                        edit_responsible,
-                        selected_id
-                    )
-                    update_record(update_data)
-                    st.success("Изменения сохранены!")
-                    st.rerun()
 
-        with cols[1]:
-            with st.form("delete_form"):
-                st.subheader("Удаление записи")
-                del_id = st.number_input("ID записи для удаления", min_value=1)
-                if st.form_submit_button("Удалить запись"):
-                    delete_record(del_id)
-                    st.success("Запись удалена!")
-                    st.rerun()
-
-    # Секция просмотра записей
-    st.header("Все записи")
-    
-    # Получаем данные из БД
-    records = get_records()
-    
-    # Создаем DataFrame
-    df = pd.DataFrame(records, columns=[
+    # Отображение данных
+    with st.expander("📋 Все записи"):
+     records = get_records()
+     df = pd.DataFrame(records, columns=[
         "ID", "Дата", "СП", "Ответственный", "ПО", "Объект", 
         "Кол-во работ", "Зона ответ.", "Начало", "Окончание", 
         "Персонал", "Проверки", "Нарушения", "Тип нарушения", 
-        "КПБ нарушение", "КПБ выявлено", "Акт"
-    ])
+        "КПБ нарушение", "КПБ выявлено", "Акт"])
+
+
+# Преобразуем даты в формат дд.мм.гггг
+     df["Дата"] = pd.to_datetime(df["Дата"], format="%d.%m.%Y").dt.strftime("%d.%m.%Y")
+
     
-    # Улучшаем отображение таблицы
-    st.dataframe(
+     st.dataframe(
         df.drop(columns=["КПБ выявлено"]),
         use_container_width=True,
-        hide_index=True,
-        column_order=[
-            "ID", "Дата", "СП", "Ответственный", "ПО", "Объект",
-            "Кол-во работ", "Зона ответ.", "Начало", "Окончание",
-            "Персонал", "Проверки", "Нарушения", "Тип нарушения",
-            "КПБ нарушение", "Акт"
-        ],
-        column_config={
-            "Дата": st.column_config.DateColumn(
-                "Дата",
-                format="DD.MM.YYYY"
-            ),
-            "Акт": st.column_config.SelectboxColumn(
-                "Акт оформлен",
-                options=["Да", "Нет"]
-            )
-        }
-    )
+        hide_index=True)
 
-    # Секция просмотра фотографий
-    st.header("Просмотр фотографий")
-    selected_id = st.number_input("Введите ID записи для просмотра фотографий", min_value=1)
-    if st.button("Показать фотографии"):
+# Управление записями
+     cols = st.columns(4)
+     selected_id = cols[0].number_input("Введите ID записи", min_value=1)
+
+     if cols[1].button("🗑️ Удалить запись"):
+        delete_record(selected_id)
+        st.success("Запись удалена!")
+        st.rerun()
+
+        
+     if selected_id:
         photos = get_photos(selected_id)
         if photos:
-            st.write(f"Фотографии для записи ID {selected_id}:")
             cols = st.columns(3)
-            for i, photo_path in enumerate(photos):
+            for i, photo in enumerate(photos):
                 with cols[i % 3]:
-                    st.image(photo_path, use_column_width=True)
+                    st.image(photo, use_container_width=True, width=300)
         else:
-            st.warning("Для этой записи нет фотографий")
+            st.warning("Нет фото для этой записи")
 
-    # Секция аналитики
-    with st.expander("Аналитика и отчеты"):
+          
+     if cols[2].button("✏️ Редактирование записи"):
+        with st.form("edit_form"):
+            selected_id = st.number_input("ID записи", min_value=1)
+            edit_date = st.date_input("Новая дата", datetime.today())
+            edit_date_str = edit_date.strftime("%d.%m.%Y")  # Форматируем дату
+            edit_sp_name = st.selectbox("Новое СП", ["АТУ", "УЖДТ"])
+            edit_responsible = st.text_input("Новый ответственный")
+            if st.form_submit_button("Сохранить изменения"):
+                update_data = (
+                    edit_date_str,  # Используем отформатированную дату
+                    edit_sp_name,
+                    edit_responsible,
+                    selected_id
+                )
+                update_record(update_data)
+                st.success("Изменения сохранены!")
+                st.rerun()
+
+
+    # Аналитика
+    with st.expander("📈 Аналитика и отчеты"):
         po_list = get_organizations()
         selected_po = st.selectbox("Выберите ПО", po_list)
         
         cols = st.columns(2)
-        start_date = cols[0].date_input("Начальная дата")
-        end_date = cols[1].date_input("Конечная дата")
+        start_date = cols[0].date_input("Начальная дата", datetime.today())
+        end_date = cols[1].date_input("Конечная дата", datetime.today())
+
+        # Преобразуем даты в формат дд.мм.гггг
+        start_date_str = start_date.strftime("%d.%m.%Y")
+        end_date_str = end_date.strftime("%d.%m.%Y")
         
-        if st.button("Сгенерировать график"):
-            conn = sqlite3.connect('software_checks.db')
+        if st.button("Сгенерировать отчет"):
+            conn = sqlite3.connect(SOFTWARE_DB)
             query = f"""
                 SELECT date, violations_count 
                 FROM checks 
                 WHERE po_name = '{selected_po}' 
-                AND date BETWEEN '{start_date.strftime("%d.%m.%Y")}' AND '{end_date.strftime("%d.%m.%Y")}'
+                AND date BETWEEN '{start_date_str}' 
+                AND '{end_date_str}'
             """
             df = pd.read_sql(query, conn)
             conn.close()
+
+            # Преобразуем даты в формат дд.мм.гггг
+            df['date'] = pd.to_datetime(df['date'], format="%d.%m.%Y").dt.strftime("%d.%m.%Y")
             
-            fig, ax = plt.subplots()
-            ax.plot(df['date'], df['violations_count'], marker='o')
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(df['date'], df['violations_count'], marker='o', linestyle='-') 
             ax.set_xlabel("Дата")
             ax.set_ylabel("Количество нарушений")
-            ax.set_title(f"Нарушения для {selected_po}")
+            ax.set_title(f"Динамика нарушений для {selected_po}")
+            ax.grid(True)
             st.pyplot(fig)
             
             output = io.BytesIO()
@@ -347,7 +662,7 @@ def main():
                 df.to_excel(writer, sheet_name='Данные', index=False)
                 
                 buf = io.BytesIO()
-                fig.savefig(buf, format='png')
+                fig.savefig(buf, format='png', bbox_inches='tight')
                 buf.seek(0)
                 
                 workbook = writer.book
@@ -357,11 +672,149 @@ def main():
             
             output.seek(0)
             st.download_button(
-                label="Скачать отчет",
+                label="📥 Скачать отчет",
                 data=output,
-                file_name=f"отчет_{selected_po}.xlsx",
+                file_name=f"Отчет_{selected_po}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
+# --------------------------
+# Модуль 3: Управление организациями
+# --------------------------
+
+def module3():
+    st.title("🏢 Список ПО")
+    init_common_db()
+
+    with st.expander("➕ Добавить организацию", expanded=True):
+        with st.form("add_org_form", clear_on_submit=True):
+            new_org = st.text_input("Название организации*")
+            if st.form_submit_button("Добавить"):
+                if new_org:
+                    try:
+                        add_organization(new_org)
+                        st.success("Организация добавлена!")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+
+    # Вывод списка всех организаций
+    with st.expander("📋 Список всех организаций", expanded=False):
+     orgs = get_organizations()
+     if orgs:
+        st.table(orgs)
+     else:
+        st.warning("Нет зарегистрированных организаций")
+
+    # Пагинация
+
+
+ # Вывод списка организаций с возможностью редактирования
+    with st.expander("✏️ Редактировать список организаций", expanded=False):
+     items_per_page = 10  # Количество организаций на странице
+     page_number = st.number_input("📄 Номер страницы", min_value=1)
+     start_idx = (page_number - 1) * items_per_page
+     end_idx = start_idx + items_per_page
+     paginated_orgs = orgs[start_idx:end_idx]
+     if paginated_orgs:
+        for idx, org in enumerate(paginated_orgs):
+            cols = st.columns([3, 1, 1])
+            cols[0].write(org)  # Отображение названия организации
+            edit_org = cols[1].text_input(f"Редактировать {org}", key=f"edit_{org}", value=org)
+            if cols[2].button("✏️ Сохранить", key=f"save_{org}"):
+                try:
+                    update_organization(org, edit_org)  # Функция для обновления организации в базе данных
+                    st.success(f"Организация '{org}' обновлена на '{edit_org}'!")
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+     else:
+        st.warning("Нет организаций, соответствующих вашему запросу.")
+
+ # Удаление организаций
+    with st.expander("❌ Удалить организацию", expanded=False):
+        orgs = get_organizations()
+        if orgs:
+            cols = st.columns([3, 1])
+            selected_org = cols[0].selectbox(
+                "Выберите организацию для удаления", 
+                orgs
+            )
+            if cols[1].button("🗑️ Удалить"):
+                delete_organization(selected_org)
+                st.success("Организация удалена!")
+                st.rerun()
+        else:
+            st.warning("Нет зарегистрированных организаций")
+
+# --------------------------
+# Общие вспомогательные функции
+# --------------------------
+
+def save_uploaded_file(uploaded_file):
+    if uploaded_file is not None:
+        file_ext = uploaded_file.name.split('.')[-1]
+        filename = f"{uuid.uuid4()}.{file_ext}"
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        with open(file_path, 'wb') as f:
+            f.write(uploaded_file.getbuffer())
+        return file_path
+    return None
+
+def generate_act(record):
+    try:
+        doc = Document("template.docx")
+        replacements = {
+            "{inspection_date}": record.get("inspection_date", ""),
+            "{object}": record.get("object", ""),
+            "{section}": record.get("section", ""),
+            "{organization}": record.get("organization", ""),
+            "{violator_name}": record.get("violator_name", ""),
+            "{violation_description}": record.get("violation_description", ""),
+            "{violation_type}": record.get("violation_type", ""),
+            "{violation_category}": record.get("violation_category", ""),
+            "{risk_level}": record.get("risk_level", ""),
+            "{inspector_name}": record.get("inspector_name", ""),
+            "{elimination_date}": record.get("elimination_date", ""),
+            "{elimination_status}": record.get("elimination_status", "")
+        }
+        
+        for para in doc.paragraphs:
+            for key, value in replacements.items():
+                if key in para.text:
+                    para.text = para.text.replace(key, str(value))
+
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for key, value in replacements.items():
+                        if key in cell.text:
+                            cell.text = cell.text.replace(key, str(value))
+
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
+    except Exception as e:
+        st.error(f"Ошибка генерации акта: {str(e)}")
+        return None
+
+# --------------------------
+# Запуск приложения
+# --------------------------
+
 if __name__ == "__main__":
-    main()
+    main_menu()
+    
+    if not hasattr(st.session_state, 'module'):
+        st.session_state.module = None
+        
+    if st.session_state.module == "module1":
+        module1()
+    elif st.session_state.module == "module2":
+        module2()
+    elif st.session_state.module == "module3":
+        module3()
+    else:
+        st.title("🏠 Главное меню")
+        st.write("Выберите модуль в боковом меню 👈")
