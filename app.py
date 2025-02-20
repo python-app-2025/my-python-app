@@ -531,7 +531,7 @@ def module2():
     
 
     # Форма добавления записи
-    with st.expander("➕ Добавить новую запись", expanded=False):
+    with st.expander("➕ Добавить новую запись", expanded=True):
         with st.form("add_record_form", clear_on_submit=True):
             cols = st.columns(2)
             date = cols[0].date_input("Дата*", datetime.today())
@@ -614,7 +614,7 @@ def module2():
 
 
     # Отображение данных
-    with st.expander("📋 Все записи"):
+    with st.expander("📋 Все записи", expanded=True):
      records = get_records()
      df = pd.DataFrame(records, columns=[
         "ID", "Дата", "СП", "Ответственный", "ПО", "Объект", 
